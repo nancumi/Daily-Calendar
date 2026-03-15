@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['content', 'date', 'createdAt']) &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 1000 &&
+             data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+             data.createdAt is string &&
+             (!('completed' in data) || data.completed is bool);
+    }
+
+    match /events/{eventId} {
+      // For this specific request, we allow public access as requested by the user
+      allow read: if true;
+      allow create: if isValidEvent(request.resource.data);
+      allow update: if isValidEvent(request.resource.data);
+      allow delete: if true;
+    }
+  }
+}

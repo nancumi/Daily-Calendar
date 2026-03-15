@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "Event": {
+      "title": "Event",
+      "description": "A calendar event entry.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "The content of the event."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "The date of the event in YYYY-MM-DD format."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the event was created."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the event is completed."
+        }
+      },
+      "required": ["content", "date", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/events": {
+      "schema": "Event",
+      "description": "Collection of calendar events."
+    }
+  }
+}
