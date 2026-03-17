@@ -51,6 +51,7 @@ export default function App() {
   const [longPressedEvent, setLongPressedEvent] = useState<EventData | null>(null);
   const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [editDate, setEditDate] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const popupInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -154,14 +155,16 @@ export default function App() {
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingEvent || !editContent.trim()) return;
+    if (!editingEvent || !editContent.trim() || !editDate) return;
 
     try {
       await updateDoc(doc(db, 'events', editingEvent.id), {
-        content: editContent.trim()
+        content: editContent.trim(),
+        date: editDate
       });
       setEditingEvent(null);
       setEditContent('');
+      setEditDate('');
     } catch (error) {
       console.error('Error updating event:', error);
     }
@@ -329,6 +332,7 @@ export default function App() {
                   onClick={() => {
                     setEditingEvent(longPressedEvent);
                     setEditContent(longPressedEvent.content);
+                    setEditDate(longPressedEvent.date);
                     setLongPressedEvent(null);
                   }}
                   className="w-full flex items-center gap-3 px-4 py-4 text-zinc-300 hover:bg-white/5 rounded-xl transition-colors"
@@ -389,14 +393,27 @@ export default function App() {
                   </button>
                 </div>
                 <form onSubmit={handleUpdate} className="space-y-6">
-                  <input
-                    ref={editInputRef}
-                    type="text"
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full bg-zinc-800/50 border border-white/10 rounded-2xl px-6 py-5 text-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50 transition-all"
-                  />
-                  <div className="flex gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest ml-1">내용</label>
+                    <input
+                      ref={editInputRef}
+                      type="text"
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      placeholder="내용을 입력하세요"
+                      className="w-full bg-zinc-800/50 border border-white/10 rounded-2xl px-6 py-5 text-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest ml-1">날짜</label>
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      className="w-full bg-zinc-800/50 border border-white/10 rounded-2xl px-6 py-5 text-lg text-white focus:outline-none focus:ring-2 focus:ring-sky-500/50 transition-all [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-4">
                     <button
                       type="submit"
                       className="flex-1 bg-sky-600 hover:bg-sky-500 text-white py-4 rounded-2xl font-medium transition-all shadow-lg shadow-sky-900/20"
