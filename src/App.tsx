@@ -27,7 +27,7 @@ import {
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { db } from './firebase';
-import { Plus, Calendar as CalendarIcon, Loader2, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Loader2, ChevronLeft, ChevronRight, ArrowLeft, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface EventData {
@@ -52,6 +52,9 @@ export default function App() {
   const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editDate, setEditDate] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [lastNotifiedTime, setLastNotifiedTime] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const popupInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +72,40 @@ export default function App() {
       }
     };
     testConnection();
+
+    // Request notification permission
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(permission => {
+          setNotificationPermission(permission);
+        });
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        const now = Date.now();
+        const cooldown = 180 * 60 * 1000; // 180분 (밀리초 단위)
+
+        const pendingTasks = events.filter(e => !e.completed);
+        
+        // 미완료 일정이 있고, 권한이 있으며, 마지막 알림 후 180분이 지났을 때만 발송
+        if (pendingTasks.length > 0 && notificationPermission === 'granted' && (now - lastNotifiedTime > cooldown)) {
+          new Notification('오늘의 일정을 확인하세요!', {
+            body: `아직 완료하지 않은 일정이 ${pendingTasks.length}개 있습니다.`,
+            icon: '/favicon.ico'
+          });
+          setLastNotifiedTime(now); // 알림 발송 시간 기록
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [events, notificationPermission]);
 
   useEffect(() => {
     // Listen for today's events
@@ -130,6 +166,36 @@ export default function App() {
       console.error('Error adding event:', error);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const qToday = query(
+        collection(db, 'events'),
+        where('date', '==', today),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(qToday);
+      const eventList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as EventData[];
+      setEvents(eventList);
+      
+      // Also refresh all events for calendar dots
+      const qAll = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
+      const snapshotAll = await getDocs(qAll);
+      const eventListAll = snapshotAll.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as EventData[];
+      setAllEvents(eventListAll);
+    } catch (error) {
+      console.error('Error refreshing events:', error);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500); // Small delay for visual feedback
     }
   };
 
@@ -483,18 +549,33 @@ export default function App() {
                     className="w-full bg-zinc-900/40 border border-white/10 rounded-2xl px-6 py-5 text-lg focus:outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 transition-all placeholder:text-zinc-600"
                     disabled={isSubmitting}
                   />
-                  <button
-                    type="submit"
-                    disabled={!content.trim() || isSubmitting}
-                    className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-900/20"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Plus className="w-5 h-5" />
-                    )}
-                    <span>등록</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="submit"
+                      disabled={!content.trim() || isSubmitting}
+                      className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-900/20"
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Plus className="w-5 h-5" />
+                      )}
+                      <span>등록</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRefresh}
+                      disabled={isRefreshing}
+                      className="w-full bg-zinc-800 hover:bg-zinc-700 disabled:text-zinc-600 text-zinc-300 py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2"
+                    >
+                      {isRefreshing ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-5 h-5" />
+                      )}
+                      <span>불러오기</span>
+                    </button>
+                  </div>
                 </form>
               </section>
 
