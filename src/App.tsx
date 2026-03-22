@@ -61,11 +61,25 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [notificationInterval, setNotificationInterval] = useState<number>(180);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isTestingPush, setIsTestingPush] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const popupInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
   const today = format(new Date(), 'yyyy-MM-dd');
+
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  };
 
   useEffect(() => {
     // Generate or retrieve userId
@@ -116,7 +130,7 @@ export default function App() {
             // Subscribe to push
             const subscription = await registration.pushManager.subscribe({
               userVisibleOnly: true,
-              applicationServerKey: publicKey
+              applicationServerKey: urlBase64ToUint8Array(publicKey)
             });
 
             // Send subscription to server
@@ -314,6 +328,29 @@ export default function App() {
       alert('설정 저장 중 오류가 발생했습니다.');
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    if (!userId || isTestingPush) return;
+    setIsTestingPush(true);
+    try {
+      const response = await fetch('/api/test-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      });
+      const result = await response.json();
+      if (result.success) {
+        alert('테스트 알림이 발송되었습니다. 잠시만 기다려주세요!');
+      } else {
+        throw new Error(result.error || '알림 발송 실패');
+      }
+    } catch (error) {
+      console.error('Error testing push:', error);
+      alert('알림 발송에 실패했습니다. 권한 설정을 다시 확인해주세요.');
+    } finally {
+      setIsTestingPush(false);
     }
   };
 
@@ -641,11 +678,23 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col gap-3 pt-4">
+                  <button
+                    onClick={handleTestNotification}
+                    disabled={isTestingPush || notificationPermission !== 'granted'}
+                    className="w-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2"
+                  >
+                    {isTestingPush ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Bell className="w-5 h-5" />
+                    )}
+                    <span>테스트 알림 보내기</span>
+                  </button>
                   <button
                     onClick={handleSaveSettings}
                     disabled={isSavingSettings}
-                    className="flex-1 bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-900/20"
+                    className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-900/20"
                   >
                     {isSavingSettings ? (
                       <Loader2 className="w-5 h-5 animate-spin" />

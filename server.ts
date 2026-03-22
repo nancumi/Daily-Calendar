@@ -54,19 +54,53 @@ async function startServer() {
   app.post("/api/save-subscription", async (req, res) => {
     const { subscription, userId } = req.body;
     if (!subscription || !userId) {
+      console.log("[Subscription] Missing subscription or userId", { userId });
       return res.status(400).json({ error: "Missing subscription or userId" });
     }
 
+    console.log(`[Subscription] Saving subscription for user ${userId}`);
     try {
       await db.collection("push_subscriptions").doc(userId).set({
         subscription,
         userId,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      }, { merge: true });
       res.json({ success: true });
     } catch (error) {
-      console.error("Error saving subscription:", error);
+      console.error("[Subscription] Error saving subscription:", error);
       res.status(500).json({ error: "Failed to save subscription" });
+    }
+  });
+
+  // API: Test Notification
+  app.post("/api/test-notification", async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "Missing userId" });
+    }
+
+    try {
+      const subDoc = await db.collection("push_subscriptions").doc(userId).get();
+      if (!subDoc.exists) {
+        return res.status(404).json({ error: "Subscription not found for this user" });
+      }
+
+      const { subscription } = subDoc.data()!;
+      if (!subscription) {
+        return res.status(404).json({ error: "No push subscription data found" });
+      }
+
+      const payload = JSON.stringify({
+        title: "테스트 알림입니다!",
+        body: "푸시 알림이 정상적으로 작동하고 있습니다.",
+      });
+
+      console.log(`[Test Notification] Sending to user ${userId}`);
+      await webpush.sendNotification(subscription, payload);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Test Notification] Error:", error);
+      res.status(500).json({ error: (error as any).message || "Failed to send test notification" });
     }
   });
 
@@ -76,8 +110,11 @@ async function startServer() {
     console.log(`Running periodic background check for incomplete tasks at ${new Date().toISOString()}...`);
     try {
       const now = new Date();
-      const today = now.toISOString().split("T")[0];
-      console.log(`[Periodic Check] Start for today: ${today} using database: ${firebaseConfig.firestoreDatabaseId}`);
+      // Use KST (UTC+9) for today's date calculation
+      const kstOffset = 9 * 60 * 60 * 1000;
+      const kstDate = new Date(now.getTime() + kstOffset);
+      const today = kstDate.toISOString().split("T")[0];
+      console.log(`[Periodic Check] Start for today: ${today} (KST) using database: ${firebaseConfig.firestoreDatabaseId}`);
       
       console.log(`[Periodic Check] Fetching push_subscriptions...`);
       const subscriptionsSnapshot = await db.collection("push_subscriptions").get();
@@ -87,14 +124,23 @@ async function startServer() {
         const data = subDoc.data();
         const { subscription, userId, notificationInterval, lastNotifiedAt } = data;
         
+        if (!subscription) {
+          console.log(`[Periodic Check] No subscription for user ${userId}, skipping.`);
+          continue;
+        }
+
         // Default interval is 180 minutes (3 hours)
         const intervalMinutes = notificationInterval || 180;
         const intervalMs = intervalMinutes * 60 * 1000;
         
         const lastNotified = lastNotifiedAt ? lastNotifiedAt.toDate() : new Date(0);
+        const timeSinceLastNotification = now.getTime() - lastNotified.getTime();
+
+        console.log(`[Periodic Check] User ${userId}: Last notified at ${lastNotified.toISOString()}, Interval: ${intervalMinutes}m, Time since: ${Math.floor(timeSinceLastNotification / 1000 / 60)}m`);
         
         // Check if enough time has passed since the last notification
-        if (now.getTime() - lastNotified.getTime() >= intervalMs) {
+        if (timeSinceLastNotification >= intervalMs) {
+          console.log(`[Periodic Check] Checking events for user ${userId} on ${today}...`);
           // Check for incomplete tasks for this user on today's date
           const eventsSnapshot = await db.collection("events")
             .where("userId", "==", userId)
@@ -103,6 +149,7 @@ async function startServer() {
             .get();
           
           const pendingCount = eventsSnapshot.size;
+          console.log(`[Periodic Check] User ${userId} has ${pendingCount} pending tasks.`);
           if (pendingCount > 0) {
             const payload = JSON.stringify({
               title: "오늘의 일정을 확인하세요!",

@@ -1,0 +1,20 @@
+{
+  "name": "Daily Calendar",
+  "short_name": "Calendar",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/calendar/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/calendar/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
