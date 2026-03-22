@@ -25,12 +25,46 @@
         }
       },
       "required": ["content", "date", "createdAt"]
+    },
+    "PushSubscription": {
+      "title": "PushSubscription",
+      "description": "A push notification subscription and settings for a user.",
+      "type": "object",
+      "properties": {
+        "subscription": {
+          "type": "object",
+          "description": "The push subscription object from the browser."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the subscription was updated."
+        },
+        "notificationInterval": {
+          "type": "integer",
+          "description": "Preferred notification interval in minutes."
+        },
+        "lastNotifiedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the last notification was sent."
+        }
+      },
+      "required": ["subscription", "userId"]
     }
   },
   "firestore": {
     "/events": {
       "schema": "Event",
       "description": "Collection of calendar events."
+    },
+    "/push_subscriptions": {
+      "schema": "PushSubscription",
+      "description": "Collection of push notification subscriptions."
     }
   }
 }

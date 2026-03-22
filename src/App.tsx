@@ -27,7 +27,7 @@ import {
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { db } from './firebase';
-import { Plus, Calendar as CalendarIcon, Loader2, ChevronLeft, ChevronRight, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Loader2, ChevronLeft, ChevronRight, ArrowLeft, RefreshCw, Settings, Bell, X, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface EventData {
@@ -55,6 +55,10 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [lastNotifiedTime, setLastNotifiedTime] = useState<number>(0);
+  const [userId, setUserId] = useState<string>('');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [notificationInterval, setNotificationInterval] = useState<number>(180);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const popupInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +66,14 @@ export default function App() {
   const today = format(new Date(), 'yyyy-MM-dd');
 
   useEffect(() => {
+    // Generate or retrieve userId
+    let storedUserId = localStorage.getItem('calendar_user_id');
+    if (!storedUserId) {
+      storedUserId = 'user_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('calendar_user_id', storedUserId);
+    }
+    setUserId(storedUserId);
+
     const testConnection = async () => {
       try {
         await getDocFromServer(doc(db, 'test', 'connection'));
@@ -73,15 +85,51 @@ export default function App() {
     };
     testConnection();
 
-    // Request notification permission
-    if ('Notification' in window) {
-      setNotificationPermission(Notification.permission);
-      if (Notification.permission === 'default') {
-        Notification.requestPermission().then(permission => {
+    // Register Service Worker and Subscribe to Push
+    const setupPush = async () => {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          const registration = await navigator.serviceWorker.register('/sw.js');
+          console.log('Service Worker registered');
+
+          // Fetch current settings from Firestore
+          const subDoc = await getDocs(query(collection(db, 'push_subscriptions'), where('userId', '==', storedUserId)));
+          if (!subDoc.empty) {
+            const data = subDoc.docs[0].data();
+            if (data.notificationInterval) {
+              setNotificationInterval(data.notificationInterval);
+            }
+          }
+
+          // Request notification permission
+          const permission = await Notification.requestPermission();
           setNotificationPermission(permission);
-        });
+
+          if (permission === 'granted') {
+            // Get VAPID public key from server
+            const response = await fetch('/api/vapid-public-key');
+            const { publicKey } = await response.json();
+
+            // Subscribe to push
+            const subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: publicKey
+            });
+
+            // Send subscription to server
+            await fetch('/api/save-subscription', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscription, userId: storedUserId })
+            });
+            console.log('Push subscription saved');
+          }
+        } catch (error) {
+          console.error('Error setting up push:', error);
+        }
       }
-    }
+    };
+    setupPush();
   }, []);
 
   useEffect(() => {
@@ -108,9 +156,12 @@ export default function App() {
   }, [events, notificationPermission]);
 
   useEffect(() => {
-    // Listen for today's events
+    if (!userId) return;
+
+    // Listen for today's events for this user
     const qToday = query(
       collection(db, 'events'),
+      where('userId', '==', userId),
       where('date', '==', today),
       orderBy('createdAt', 'desc')
     );
@@ -127,8 +178,12 @@ export default function App() {
       setLoading(false);
     });
 
-    // Listen for all events to show dots on calendar
-    const qAll = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
+    // Listen for all events for this user to show dots on calendar
+    const qAll = query(
+      collection(db, 'events'), 
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc')
+    );
     const unsubscribeAll = onSnapshot(qAll, (snapshot) => {
       const eventList = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -141,7 +196,7 @@ export default function App() {
       unsubscribeToday();
       unsubscribeAll();
     };
-  }, [today]);
+  }, [today, userId]);
 
   const handleRegister = async (e?: React.FormEvent, targetDate: string = today, isPopup: boolean = false) => {
     if (e) e.preventDefault();
@@ -154,7 +209,8 @@ export default function App() {
         content: content.trim(),
         date: targetDate,
         createdAt: new Date().toISOString(),
-        completed: false
+        completed: false,
+        userId: userId
       });
       setContent('');
       if (isPopup) {
@@ -174,6 +230,7 @@ export default function App() {
     try {
       const qToday = query(
         collection(db, 'events'),
+        where('userId', '==', userId),
         where('date', '==', today),
         orderBy('createdAt', 'desc')
       );
@@ -185,7 +242,11 @@ export default function App() {
       setEvents(eventList);
       
       // Also refresh all events for calendar dots
-      const qAll = query(collection(db, 'events'), orderBy('createdAt', 'desc'));
+      const qAll = query(
+        collection(db, 'events'), 
+        where('userId', '==', userId),
+        orderBy('createdAt', 'desc')
+      );
       const snapshotAll = await getDocs(qAll);
       const eventListAll = snapshotAll.docs.map(doc => ({
         id: doc.id,
@@ -233,6 +294,23 @@ export default function App() {
       setEditDate('');
     } catch (error) {
       console.error('Error updating event:', error);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    if (!userId || isSavingSettings) return;
+    setIsSavingSettings(true);
+    try {
+      await updateDoc(doc(db, 'push_subscriptions', userId), {
+        notificationInterval: notificationInterval,
+        updatedAt: new Date().toISOString()
+      });
+      setIsSettingsOpen(false);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('설정 저장 중 오류가 발생했습니다.');
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -501,6 +579,85 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-[32px] overflow-hidden shadow-2xl"
+            >
+              <div className="p-8 border-b border-white/5 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-medium text-white flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-sky-400" />
+                    알림 설정
+                  </h3>
+                  <p className="text-zinc-500 text-xs mt-1 uppercase tracking-widest font-bold">Notification Settings</p>
+                </div>
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                >
+                  <X className="w-6 h-6 text-zinc-500" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-8">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                      <Bell className="w-4 h-4 text-sky-400" />
+                      알림 간격 (분)
+                    </label>
+                    <span className="text-sky-400 font-mono font-bold bg-sky-400/10 px-3 py-1 rounded-full text-xs">
+                      {Math.floor(notificationInterval / 60)}시간 {notificationInterval % 60}분
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="1440"
+                    step="1"
+                    value={notificationInterval}
+                    onChange={(e) => setNotificationInterval(parseInt(e.target.value))}
+                    className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-zinc-600 font-bold uppercase tracking-tighter">
+                    <span>1분</span>
+                    <span>12시간</span>
+                    <span>24시간</span>
+                  </div>
+                  <div className="bg-zinc-800/50 border border-white/5 rounded-2xl p-4 mt-4">
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      설정한 시간마다 미완료된 일정이 있는지 확인하여 알림을 보냅니다. 
+                      <span className="block mt-1 text-sky-400/70 font-medium">* 최소 1분에서 최대 1440분(24시간)까지 설정 가능합니다.</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={handleSaveSettings}
+                    disabled={isSavingSettings}
+                    className="flex-1 bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white py-4 rounded-2xl font-medium transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-900/20"
+                  >
+                    {isSavingSettings ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Check className="w-5 h-5" />
+                    )}
+                    <span>설정 저장</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <div className="max-w-2xl mx-auto px-6 py-5">
         <AnimatePresence mode="wait">
           {view === 'daily' ? (
@@ -526,15 +683,23 @@ export default function App() {
                     {format(new Date(), 'yyyy년 M월 d일 EEEE', { locale: ko })}
                   </p>
                 </div>
-                <button 
-                  onClick={() => {
-                    setSelectedDate(today);
-                    setView('monthly');
-                  }}
-                  className="p-3 bg-zinc-900/50 border border-white/5 rounded-2xl hover:bg-zinc-800 transition-colors group"
-                >
-                  <CalendarIcon className="w-6 h-6 text-sky-400 group-hover:scale-110 transition-transform" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="p-3 bg-zinc-900/50 border border-white/5 rounded-2xl hover:bg-zinc-800 transition-colors group"
+                  >
+                    <Settings className="w-6 h-6 text-zinc-500 group-hover:text-sky-400 group-hover:rotate-90 transition-all duration-300" />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSelectedDate(today);
+                      setView('monthly');
+                    }}
+                    className="p-3 bg-zinc-900/50 border border-white/5 rounded-2xl hover:bg-zinc-800 transition-colors group"
+                  >
+                    <CalendarIcon className="w-6 h-6 text-sky-400 group-hover:scale-110 transition-transform" />
+                  </button>
+                </div>
               </header>
 
               {/* Input Section */}
@@ -640,6 +805,12 @@ export default function App() {
                     {format(currentMonth, 'yyyy년 M월', { locale: ko })}
                   </h1>
                   <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setIsSettingsOpen(true)}
+                      className="p-3 bg-zinc-900/50 border border-white/5 rounded-2xl hover:bg-zinc-800 transition-colors group"
+                    >
+                      <Settings className="w-6 h-6 text-zinc-500 group-hover:text-sky-400 group-hover:rotate-90 transition-all duration-300" />
+                    </button>
                     <button 
                       onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
                       className="p-2 hover:bg-white/5 rounded-lg transition-colors"

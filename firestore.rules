@@ -21,5 +21,9 @@ service cloud.firestore {
       allow update: if isValidEvent(request.resource.data);
       allow delete: if true;
     }
+
+    match /push_subscriptions/{userId} {
+      allow read, write: if true; // For simplicity in this demo, but should be restricted in production
+    }
   }
 }
