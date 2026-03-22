@@ -4,6 +4,7 @@ import path from "path";
 import webpush from "web-push";
 import admin from "firebase-admin";
 import fs from "fs";
+import { getFirestore } from "firebase-admin/firestore";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -12,11 +13,10 @@ dotenv.config();
 const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.applicationDefault(), // This might need adjustment based on environment
-    projectId: firebaseConfig.projectId,
+    credential: admin.credential.applicationDefault(),
   });
 }
-const db = admin.firestore();
+const db = getFirestore(firebaseConfig.firestoreDatabaseId);
 
 // VAPID keys should be generated once and kept secret.
 // For this environment, we'll generate them if not provided.
@@ -73,11 +73,15 @@ async function startServer() {
   // Periodic Background Check (Every 5 minutes)
   const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
   setInterval(async () => {
-    console.log("Running periodic background check for incomplete tasks...");
+    console.log(`Running periodic background check for incomplete tasks at ${new Date().toISOString()}...`);
     try {
       const now = new Date();
       const today = now.toISOString().split("T")[0];
+      console.log(`[Periodic Check] Start for today: ${today} using database: ${firebaseConfig.firestoreDatabaseId}`);
+      
+      console.log(`[Periodic Check] Fetching push_subscriptions...`);
       const subscriptionsSnapshot = await db.collection("push_subscriptions").get();
+      console.log(`[Periodic Check] Found ${subscriptionsSnapshot.size} subscriptions.`);
       
       for (const subDoc of subscriptionsSnapshot.docs) {
         const data = subDoc.data();
@@ -110,9 +114,9 @@ async function startServer() {
               console.log(`Sent notification to user ${userId}`);
               
               // Update lastNotifiedAt
-              await db.collection("push_subscriptions").doc(userId).update({
+              await db.collection("push_subscriptions").doc(userId).set({
                 lastNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-              });
+              }, { merge: true });
             } catch (error) {
               console.error(`Error sending notification to user ${userId}:`, error);
               // If subscription is expired, remove it

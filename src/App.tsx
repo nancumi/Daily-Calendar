@@ -11,7 +11,9 @@ import {
   updateDoc,
   deleteDoc,
   Timestamp,
-  getDocs
+  getDocs,
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
 import { 
   format, 
@@ -93,9 +95,10 @@ export default function App() {
           console.log('Service Worker registered');
 
           // Fetch current settings from Firestore
-          const subDoc = await getDocs(query(collection(db, 'push_subscriptions'), where('userId', '==', storedUserId)));
-          if (!subDoc.empty) {
-            const data = subDoc.docs[0].data();
+          const subDocRef = doc(db, 'push_subscriptions', storedUserId);
+          const subDocSnap = await getDoc(subDocRef);
+          if (subDocSnap.exists()) {
+            const data = subDocSnap.data();
             if (data.notificationInterval) {
               setNotificationInterval(data.notificationInterval);
             }
@@ -301,10 +304,10 @@ export default function App() {
     if (!userId || isSavingSettings) return;
     setIsSavingSettings(true);
     try {
-      await updateDoc(doc(db, 'push_subscriptions', userId), {
+      await setDoc(doc(db, 'push_subscriptions', userId), {
         notificationInterval: notificationInterval,
         updatedAt: new Date().toISOString()
-      });
+      }, { merge: true });
       setIsSettingsOpen(false);
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -801,16 +804,10 @@ export default function App() {
                   <span className="text-sm font-medium">돌아가기</span>
                 </button>
                 <div className="flex items-center justify-between">
-                  <h1 className="text-3xl font-light tracking-tight text-white">
+                  <h1 className="text-2xl font-light tracking-tight text-white">
                     {format(currentMonth, 'yyyy년 M월', { locale: ko })}
                   </h1>
                   <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setIsSettingsOpen(true)}
-                      className="p-3 bg-zinc-900/50 border border-white/5 rounded-2xl hover:bg-zinc-800 transition-colors group"
-                    >
-                      <Settings className="w-6 h-6 text-zinc-500 group-hover:text-sky-400 group-hover:rotate-90 transition-all duration-300" />
-                    </button>
                     <button 
                       onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
                       className="p-2 hover:bg-white/5 rounded-lg transition-colors"

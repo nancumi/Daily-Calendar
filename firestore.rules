@@ -23,7 +23,14 @@ service cloud.firestore {
     }
 
     match /push_subscriptions/{userId} {
-      allow read, write: if true; // For simplicity in this demo, but should be restricted in production
+      // Allow anyone to read/write their own subscription document by ID
+      // In a real app, this should be tied to request.auth.uid
+      allow read, write: if true;
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
